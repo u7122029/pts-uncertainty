@@ -2,13 +2,13 @@ import os
 import tensorflow as tf
 import numpy as np
 import torch
-import time
 from torch.nn.functional import one_hot, relu
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 from torchmetrics import MeanMetric
+from pathlib import Path
 
 
 class PTS_calibrator:
@@ -258,6 +258,7 @@ class PTSCalibrator_Torch(nn.Module):
         assert logits.shape[1] == self.length_logits, "logits need to have same length as length_logits!"
         dset = TensorDataset(logits, labels)
 
+        self.model.train()
         self.model = self.model.to(device)
         dataloader = DataLoader(dset, batch_size=self.batch_size, shuffle=True)
         mean_loss = MeanMetric()
@@ -280,8 +281,6 @@ class PTSCalibrator_Torch(nn.Module):
             mean_loss.update(epoch_loss)
             epoch_progress.set_postfix({"mean_loss": mean_loss.compute().item()})
 
-        #logits = np.clip(logits, -clip, clip)
-
     def calibrate(self, logits, clip=1e2):
         """
         Calibrate logits with PTS model
@@ -300,20 +299,22 @@ class PTSCalibrator_Torch(nn.Module):
 
         return calibrated_probs
 
-    def save(self, path = "./"):
+    def save(self, path):
         """Save PTS model parameters"""
+        directory = Path("weights")
+        directory.mkdir(exist_ok=True, parents=True)
+        path = directory / path
 
-        if not os.path.exists(path):
-            os.makedirs(path)
+        print("Saving PTS model to: ", str(path))
+        torch.save(self.model.state_dict(), str(path))
 
-        print("Save PTS model to: ", os.path.join(path, "pts_model.h5"))
-        self.model.save_weights(os.path.join(path, "pts_model.h5"))
-
-    def load(self, path = "./"):
+    def load(self, path):
         """Load PTS model parameters"""
+        path = Path("weights") / path
+        checkpoint = torch.load(str(path))
 
-        print("Load PTS model from: ", os.path.join(path, "pts_model.h5"))
-        self.model.load_weights(os.path.join(path, "pts_model.h5"))
+        print("Loading PTS model from: ", str(path))
+        self.model.load_state_dict(checkpoint)
 
 
 if __name__ == "__main__":
@@ -322,3 +323,5 @@ if __name__ == "__main__":
     labels = one_hot(d["labels"], 1000).to(torch.float)
     c = PTSCalibrator_Torch(1000, batch_size=1500)
     c.tune(logits, labels, "cuda")
+    c.save("model_weights.pt")
+    c.load("model_weights.pt")
